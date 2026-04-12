@@ -1,39 +1,48 @@
-// src/App.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog"; // 追加したプラグイン
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
 function App() {
   const [filePath, setFilePath] = useState("");
   const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState(0);
 
-  // ファイル選択ダイアログを開く関数
+  // Rustからの進捗イベントを受け取る設定
+  useEffect(() => {
+    const unlisten = listen<{ percentage: number }>("conversion-progress", (event) => {
+      setProgress(Math.round(event.payload.percentage));
+    });
+
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
   const selectFile = async () => {
     const selected = await open({
       multiple: false,
       filters: [{ name: '動画ファイル', extensions: ['ts'] }]
     });
-    // ファイルが選ばれたらパスを保存
     if (selected !== null && !Array.isArray(selected)) {
       setFilePath(selected);
-      setStatus("ファイルが選択されました。変換を開始してください。");
+      setStatus("ファイルが選択されました。");
     }
   };
 
-  // 変換を実行する関数
   const handleConvert = async () => {
-    setStatus("変換中...（しばらくお待ちください）");
+    if (!filePath) return;
+    setStatus("変換中...");
+    setProgress(0);
+    
     try {
-      // 拡張子を .ts から .mp4 に書き換えたパスを作成
-      const outPath = filePath.replace(/\.ts$/, ".mp4");
-      
-      // Rustの関数を呼び出す
-      const result = await invoke("convert_ts_to_mp4", { 
+      const outputPath = filePath.replace(/\.ts$/, ".mp4");
+      // 先ほどエラーになっていた変数をしっかり指定
+      const result = await invoke("convert_with_progress", { 
         inputPath: filePath, 
-        outputPath: outPath 
+        outputPath: outputPath 
       });
-      
       setStatus(result as string);
     } catch (err) {
       setStatus("エラーが発生しました: " + err);
@@ -51,6 +60,20 @@ function App() {
         </p>
       </div>
 
+      {/* 進捗バー */}
+      <div style={{ width: "100%", backgroundColor: "#e0e0e0", borderRadius: "4px", margin: "20px 0" }}>
+        <div 
+          style={{ 
+            width: `${progress}%`, 
+            height: "20px", 
+            backgroundColor: "#4caf50", 
+            borderRadius: "4px",
+            transition: "width 0.2s" 
+          }} 
+        />
+      </div>
+      <p>{progress}% 完了</p>
+
       <button onClick={handleConvert} disabled={!filePath}>
         MP4に変換
       </button>
@@ -62,4 +85,5 @@ function App() {
   );
 }
 
+// 省略してしまっていた「エクスポート（必須）」
 export default App;
